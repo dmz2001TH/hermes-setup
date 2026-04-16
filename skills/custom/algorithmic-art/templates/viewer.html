@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generative Art Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-input: #252525;
+            --text: #e5e5e5;
+            --text-muted: #888;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --green: #34d399;
+            --blue: #60a5fa;
+            --border: #333;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            color: var(--text);
+        }
+        .container { display: flex; min-height: 100vh; padding: 16px; gap: 16px; }
+        .sidebar {
+            width: 300px; flex-shrink: 0;
+            background: var(--bg-card);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow-y: auto;
+        }
+        .sidebar h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+        .sidebar .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+        .control-section { margin-bottom: 24px; }
+        .control-section h3 {
+            font-size: 13px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 12px;
+        }
+        .seed-input {
+            width: 100%; background: var(--bg-input); padding: 10px;
+            border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+            font-size: 13px; margin-bottom: 10px; border: 1px solid var(--border);
+            text-align: center; color: var(--text);
+        }
+        .seed-input:focus { outline: none; border-color: var(--accent); }
+        .seed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+        .control-group { margin-bottom: 16px; }
+        .control-group label {
+            display: block; font-size: 13px; font-weight: 500;
+            margin-bottom: 6px; color: var(--text);
+        }
+        .slider-container { display: flex; align-items: center; gap: 10px; }
+        .slider-container input[type="range"] {
+            flex: 1; height: 4px; background: var(--border);
+            border-radius: 2px; outline: none; -webkit-appearance: none;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px;
+            background: var(--accent); border-radius: 50%; cursor: pointer;
+        }
+        .slider-container input[type="range"]::-moz-range-thumb {
+            width: 14px; height: 14px; background: var(--accent);
+            border-radius: 50%; border: none; cursor: pointer;
+        }
+        .value-display {
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+            color: var(--text-muted); min-width: 50px; text-align: right;
+        }
+        .color-group { margin-bottom: 12px; }
+        .color-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+        .color-picker-container { display: flex; align-items: center; gap: 8px; }
+        .color-picker-container input[type="color"] {
+            width: 28px; height: 28px; border: none; border-radius: 4px; cursor: pointer; padding: 0;
+        }
+        .color-value { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
+        .button {
+            background: var(--accent); color: white; border: none;
+            padding: 8px 14px; border-radius: 6px; font-size: 13px;
+            font-weight: 500; cursor: pointer; width: 100%;
+            transition: background 0.2s;
+        }
+        .button:hover { background: var(--accent-hover); }
+        .button.secondary { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
+        .button.secondary:hover { border-color: var(--accent); }
+        .button.tertiary { background: #065f46; color: var(--green); }
+        .button.tertiary:hover { background: #047857; }
+        .button-row { display: flex; gap: 6px; }
+        .button-row .button { flex: 1; }
+        .canvas-area {
+            flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0;
+        }
+        #canvas-container {
+            width: 100%; max-width: 900px; border-radius: 12px; overflow: hidden;
+            border: 1px solid var(--border); background: #111;
+        }
+        #canvas-container canvas { display: block; width: 100% !important; height: auto !important; }
+        .loading { display: flex; align-items: center; justify-content: center; padding: 100px; color: var(--text-muted); }
+        @media (max-width: 600px) {
+            .container { flex-direction: column; }
+            .sidebar { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1 id="art-title">Generative Art</h1>
+            <div class="subtitle" id="art-subtitle">Algorithmic composition</div>
+
+            <div class="control-section">
+                <h3>Seed</h3>
+                <input type="number" id="seed-input" class="seed-input" value="12345" onchange="updateSeed()">
+                <div class="seed-controls">
+                    <button class="button secondary" onclick="previousSeed()">← Prev</button>
+                    <button class="button secondary" onclick="nextSeed()">Next →</button>
+                </div>
+                <button class="button tertiary" onclick="randomSeedAndUpdate()">↻ Random</button>
+            </div>
+
+            <!-- PARAMETERS - CUSTOMIZE FOR YOUR ART -->
+            <div class="control-section" id="parameters-section">
+                <h3>Parameters</h3>
+                <!-- Add control-groups here -->
+            </div>
+
+            <!-- COLORS - OPTIONAL -->
+            <div class="control-section" id="colors-section" style="display:none">
+                <h3>Colors</h3>
+                <!-- Add color-groups here -->
+            </div>
+
+            <div class="control-section">
+                <h3>Actions</h3>
+                <div class="button-row">
+                    <button class="button" onclick="regenerate()">Regenerate</button>
+                    <button class="button secondary" onclick="resetParameters()">Reset</button>
+                </div>
+                <button class="button secondary" style="margin-top:6px" onclick="downloadPNG()">⬇ Download PNG</button>
+            </div>
+        </div>
+
+        <div class="canvas-area">
+            <div id="canvas-container">
+                <div class="loading">Initializing...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════
+        // PARAMETERS - CUSTOMIZE FOR YOUR ALGORITHM
+        // ═══════════════════════════════════════════════════════
+        let params = {
+            seed: 12345,
+            // Add your parameters here
+        };
+        let defaultParams = JSON.parse(JSON.stringify(params));
+
+        // ═══════════════════════════════════════════════════════
+        // P5.JS ALGORITHM - REPLACE WITH YOUR VISION
+        // ═══════════════════════════════════════════════════════
+        function setup() {
+            let canvas = createCanvas(1200, 1200);
+            canvas.parent('canvas-container');
+            initializeSystem();
+            document.querySelector('.loading').style.display = 'none';
+        }
+
+        function initializeSystem() {
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+            background(15, 15, 15);
+            // Your initialization here
+        }
+
+        function draw() {
+            // Your algorithm here
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // UI HANDLERS - CUSTOMIZE FOR YOUR PARAMETERS
+        // ═══════════════════════════════════════════════════════
+        function updateParam(name, value) {
+            params[name] = parseFloat(value);
+            document.getElementById(name + '-value').textContent = value;
+        }
+
+        function updateColor(colorId, value) {
+            let idx = parseInt(colorId.replace('color', '')) - 1;
+            params.colorPalette[idx] = value;
+            document.getElementById(colorId + '-value').textContent = value;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // SEED & ACTIONS - KEEP THESE
+        // ═══════════════════════════════════════════════════════
+        function updateSeedDisplay() { document.getElementById('seed-input').value = params.seed; }
+        function updateSeed() {
+            let v = parseInt(document.getElementById('seed-input').value);
+            if (v && v > 0) { params.seed = v; initializeSystem(); } else { updateSeedDisplay(); }
+        }
+        function previousSeed() { params.seed = Math.max(1, params.seed - 1); updateSeedDisplay(); initializeSystem(); }
+        function nextSeed() { params.seed++; updateSeedDisplay(); initializeSystem(); }
+        function randomSeedAndUpdate() { params.seed = Math.floor(Math.random() * 999999) + 1; updateSeedDisplay(); initializeSystem(); }
+        function regenerate() { initializeSystem(); }
+        function resetParameters() {
+            params = JSON.parse(JSON.stringify(defaultParams));
+            updateSeedDisplay();
+            // Reset UI sliders if you have any
+            initializeSystem();
+        }
+        function downloadPNG() { saveCanvas('generative-art-' + params.seed, 'png'); }
+
+        window.addEventListener('load', updateSeedDisplay);
+    </script>
+</body>
+</html>
