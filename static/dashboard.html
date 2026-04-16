@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+    --text: #e0e0e8; --dim: #8888a0; --accent: #6c8cff;
+    --green: #4ade80; --yellow: #facc15; --red: #f87171;
+    --bar-bg: #2a2d3a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+         background: var(--bg); color: var(--text); padding: 20px; }
+  h1 { font-size: 1.3rem; margin-bottom: 6px; color: var(--accent); }
+  .meta { color: var(--dim); font-size: .8rem; margin-bottom: 20px; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                margin-right: 6px; vertical-align: middle; }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.disconnected { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          padding: 20px; }
+  .card-title { font-size: .75rem; color: var(--dim); text-transform: uppercase;
+                letter-spacing: 1px; margin-bottom: 10px; }
+  .card-value { font-size: 2rem; font-weight: 700; }
+  .card-sub { font-size: .8rem; color: var(--dim); margin-top: 4px; }
+
+  .bar-track { height: 8px; background: var(--bar-bg); border-radius: 4px;
+               margin-top: 12px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width .6s ease,
+              background .3s ease; }
+
+  .wide { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  th { text-align: left; color: var(--dim); font-weight: 500; padding: 8px 10px;
+       border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(108,140,255,.06); }
+
+  .docker-container { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .docker-badge { background: var(--bar-bg); padding: 4px 10px; border-radius: 6px;
+                  font-size: .78rem; }
+
+  #logs-box { max-height: 320px; overflow-y: auto; font-size: .76rem; color: var(--dim);
+              line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<h1>&#x1F4CA; System Dashboard</h1>
+<div class="meta">
+  <span class="status-dot disconnected" id="ws-dot"></span>
+  <span id="ws-status">Connecting…</span>
+  &nbsp;|&nbsp; <span id="hostname"></span>
+  &nbsp;|&nbsp; <span id="os-info"></span>
+  &nbsp;|&nbsp; Uptime: <span id="uptime">—</span>
+</div>
+
+<!-- Stat cards -->
+<div class="grid">
+  <div class="card">
+    <div class="card-title">CPU Usage</div>
+    <div class="card-value" id="cpu-val">—%</div>
+    <div class="card-sub" id="cpu-sub"></div>
+    <div class="bar-track"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Memory Usage</div>
+    <div class="card-value" id="ram-val">—%</div>
+    <div class="card-sub" id="ram-sub"></div>
+    <div class="bar-track"><div class="bar-fill" id="ram-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Disk Usage</div>
+    <div class="card-value" id="disk-val">—%</div>
+    <div class="card-sub" id="disk-sub"></div>
+    <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Network I/O</div>
+    <div class="card-value" id="net-val">—</div>
+    <div class="card-sub" id="net-sub"></div>
+  </div>
+</div>
+
+<!-- Processes -->
+<div class="grid">
+  <div class="card wide">
+    <div class="card-title">Top Processes by CPU</div>
+    <table>
+      <thead><tr><th>PID</th><th>Name</th><th>CPU %</th><th>MEM %</th><th>Status</th></tr></thead>
+      <tbody id="proc-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Docker + Logs -->
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Docker Containers</div>
+    <div id="docker-box">Loading…</div>
+  </div>
+  <div class="card">
+    <div class="card-title">System Logs (last 50)</div>
+    <div id="logs-box">Loading…</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  /* ---- helpers ---- */
+  function fmtBytes(n) {
+    const u = ["B","KB","MB","GB","TB"];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return n.toFixed(1) + " " + u[i];
+  }
+  function barColor(p) {
+    return p > 90 ? "var(--red)" : p > 70 ? "var(--yellow)" : "var(--green)";
+  }
+
+  /* ---- stat card updater ---- */
+  function updateStats(d) {
+    document.getElementById("cpu-val").textContent = d.cpu_percent + "%";
+    document.getElementById("cpu-sub").textContent = d.cpu_count + " cores";
+    var cpuBar = document.getElementById("cpu-bar");
+    cpuBar.style.width = d.cpu_percent + "%";
+    cpuBar.style.background = barColor(d.cpu_percent);
+
+    document.getElementById("ram-val").textContent = d.ram_percent + "%";
+    document.getElementById("ram-sub").textContent =
+      fmtBytes(d.ram_used) + " / " + fmtBytes(d.ram_total);
+    var ramBar = document.getElementById("ram-bar");
+    ramBar.style.width = d.ram_percent + "%";
+    ramBar.style.background = barColor(d.ram_percent);
+
+    document.getElementById("disk-val").textContent = d.disk_percent + "%";
+    document.getElementById("disk-sub").textContent =
+      fmtBytes(d.disk_used) + " / " + fmtBytes(d.disk_total);
+    var diskBar = document.getElementById("disk-bar");
+    diskBar.style.width = d.disk_percent + "%";
+    diskBar.style.background = barColor(d.disk_percent);
+
+    document.getElementById("net-val").textContent = "↑" + fmtBytes(d.net_sent);
+    document.getElementById("net-sub").textContent = "↓" + fmtBytes(d.net_recv);
+
+    document.getElementById("uptime").textContent = d.uptime;
+    document.getElementById("hostname").textContent = d.hostname;
+    document.getElementById("os-info").textContent = d.os;
+  }
+
+  /* ---- process table ---- */
+  function loadProcesses() {
+    fetch("/api/processes").then(function(r){return r.json()}).then(function(list){
+      var tbody = document.getElementById("proc-body");
+      tbody.innerHTML = "";
+      list.forEach(function(p){
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>"+p.pid+"</td><td>"+esc(p.name)+"</td><td>"
+          +p.cpu+"</td><td>"+p.mem+"</td><td>"+esc(p.status)+"</td>";
+        tbody.appendChild(tr);
+      });
+    }).catch(function(){});
+  }
+  function esc(s) { var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+  /* ---- docker ---- */
+  function loadDocker() {
+    fetch("/api/docker").then(function(r){return r.json()}).then(function(d){
+      var box = document.getElementById("docker-box");
+      if (!d.available) { box.textContent = d.message; return; }
+      if (d.error) { box.textContent = "Error: " + d.error; return; }
+      if (!d.containers.length) { box.textContent = "No running containers"; return; }
+      box.innerHTML = "";
+      var wrap = document.createElement("div");
+      wrap.className = "docker-container";
+      d.containers.forEach(function(c){
+        var badge = document.createElement("div");
+        badge.className = "docker-badge";
+        badge.textContent = c.name + " (" + c.image + ") — " + c.status;
+        wrap.appendChild(badge);
+      });
+      box.appendChild(wrap);
+    }).catch(function(e){ document.getElementById("docker-box").textContent = "Fetch error"; });
+  }
+
+  /* ---- logs ---- */
+  function loadLogs() {
+    fetch("/api/logs").then(function(r){return r.json()}).then(function(d){
+      document.getElementById("logs-box").textContent = d.lines.join("\n");
+    }).catch(function(){});
+  }
+
+  /* ---- WebSocket ---- */
+  var ws, retry = 1000;
+  function connect() {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + "/ws/live");
+    ws.onopen = function() {
+      retry = 1000;
+      document.getElementById("ws-dot").className = "status-dot connected";
+      document.getElementById("ws-status").textContent = "Live";
+    };
+    ws.onmessage = function(ev) {
+      try { updateStats(JSON.parse(ev.data)); } catch(e){}
+    };
+    ws.onclose = function() {
+      document.getElementById("ws-dot").className = "status-dot disconnected";
+      document.getElementById("ws-status").textContent = "Reconnecting…";
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 1.5, 15000);
+    };
+    ws.onerror = function() { ws.close(); };
+  }
+
+  /* ---- init ---- */
+  connect();
+  loadProcesses(); loadDocker(); loadLogs();
+  setInterval(loadProcesses, 5000);
+  setInterval(loadDocker, 15000);
+  setInterval(loadLogs, 10000);
+})();
+</script>
+</body>
+</html>
